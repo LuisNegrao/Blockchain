@@ -1,54 +1,51 @@
-use crate::Transport;
-use std::thread;
+use std::sync::Mutex;
+use crossbeam_channel::Receiver;
 
-pub struct Server<'a> {
-    server_options: ServerOptions<'a>,
-    message_channel: Vec<String>,
+use crate::network::transport::TransportRef;
+
+pub struct Server {
+    server_options: ServerOptions,
+    message_channel: crossbeam_channel::Receiver<String>,
+    peers: Mutex<Vec<TransportRef>>,
 }
 
-pub struct ServerOptions<'b> {
-    transports: Vec<Transport<'b>>,
+pub struct ServerOptions {
+    transports: Vec<TransportRef>,
 }
 
-impl<'b> ServerOptions<'b> {
-    pub fn new_options() -> ServerOptions<'b> {
+impl ServerOptions {
+    pub fn new_options() -> ServerOptions {
         ServerOptions {
             transports: Vec::new()
         }
     }
 }
 
-impl<'a> Server<'a> {
-    pub fn new_server(opts: ServerOptions<'a>) -> Server {
+impl Server {
+    pub fn connect(&self, transport: TransportRef) {
+        self.peers.lock().unwrap().push(transport);
+        println!("Hello")
+    }
+
+    pub fn new_server(opts: ServerOptions, receiver: Receiver<String>) -> Server {
         Server {
             server_options: opts,
-            message_channel: Vec::new(),
+            message_channel: receiver,
+            peers: Mutex::new(vec![]),
         }
     }
 
-    pub fn add_transport(&mut self, transport: Transport<'a>) {
+    fn send_message(&self, transport: TransportRef, message: String) {
+        transport.send_message(message);
+    }
+
+    pub fn add_transport(&mut self, transport: TransportRef) {
         self.server_options.transports.push(transport)
     }
 
-    pub fn init_transports(&'static mut self) {
-        let t = thread::spawn(|| {
-            for transport in &self.server_options.transports {
-                for message in transport.consume().lock().unwrap().iter() {
-                    self.message_channel.push(message.clone());
-                }
-            }
-        });
-
-        t.join();
-    }
-
     pub fn start(&mut self) {
-        self.init_transports();
-
         loop {
-            if !self.message_channel.is_empty() {
-                println!("{}", self.message_channel.len())
-            }
+            if let Ok(msg) = self.message_channel.recv() {}
         }
     }
 }

@@ -1,5 +1,5 @@
 use std::io::Bytes;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 #[derive(PartialEq, Clone)]
 pub struct NetAddr {
@@ -19,37 +19,43 @@ pub struct RPC {
     paylod: Bytes<usize>,
 }
 
-pub enum Transport<'a> {
-    LocalTransport { aadr: NetAddr, consume_channel: Mutex<Vec<String>>, peers: Mutex<Vec<&'a Transport<'a>>>, lock: String }
+pub type TransportRef = Arc<Transport>;
+
+
+pub enum Transport {
+    LocalTransport {
+        // Sending to myself
+        aadr: NetAddr,
+        consume_channel: crossbeam_channel::Sender<String>,
+        lock: String,
+    },
+    TcpTransport {
+        sender_channel: crossbeam_channel::Sender<String>
+    },
 }
 
-impl<'a> Transport<'a> {
-    pub fn connect(&'a self, transport: &'a Transport<'a>) {
-        match self {
-            Transport::LocalTransport { peers, .. } => {
-                peers.lock().unwrap().push(transport);
-                println!("Hello")
-            }
-        }
-    }
-    pub fn send_message(&self, to: &Transport, message: String) {
+impl Transport {
+
+    pub fn send_message(&self, message: String) {
         match self {
             Transport::LocalTransport { .. } => {
-                to.receive_message(message)
+                self.receive_message(message)
+            }
+            Transport::TcpTransport { .. } => {
+                //TCP Server, serialize message, send through TCP
             }
         }
     }
+
+    /// Only called from TCP layer or when we are sending to ourselves
     pub fn receive_message(&self, message: String) {
         match self {
             Transport::LocalTransport { consume_channel, .. } => {
-                consume_channel.lock().unwrap().push(message);
+                consume_channel.send(message).unwrap();
             }
-        }
-    }
-    pub fn consume(&self) -> &Mutex<Vec<String>> {
-        match self {
-            Transport::LocalTransport { consume_channel, .. } => {
-                consume_channel
+            Transport::TcpTransport { sender_channel} => {
+                // Already deserialized
+                sender_channel.send(message).unwrap();
             }
         }
     }
